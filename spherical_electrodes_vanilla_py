@@ -1,0 +1,171 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from IPython.core.display import display, HTML
+display(HTML("<style>.container { width:100% !important; }</style>"))
+
+
+def GS_potential(potential, mask, max_iter, error_threshold):
+    it = 0
+    error = 0.0
+    length = len(potential[0])
+    potentialNEW = potential.copy()
+    while True:
+        for i in range(1, length-1):
+            for j in range(1, length-1):
+                if not(mask[i][j]):
+                    potentialNEW[i][j] = 0.25*(potential[j+1][i] + potentialNEW[j-1][i] + potential[j][i+1] + potentialNEW[j][i-1])
+                    error +=np.abs(np.subtract(potentialNEW[i][j], potential[i][j]))
+        if error<error_threshold:
+            break
+        elif it>max_iter:
+            break
+        else:
+            error = 0
+            np.copyto(potential, potentialNEW)
+        it = it + 1
+    return potentialNEW, error, it
+    
+    
+    
+def SOR_potential(potential, mask, max_iter, error_threshold, alpha):
+    height, width = potential.shape #a bit more general anyway
+    sor_adjust = 0.0
+    it = 0
+    error = 0.0
+    length = len(potential[0])
+    input_matrix = potential.copy()
+    gauss_seidel = potential.copy()
+    while True:
+        for row in range(1, width-1):
+            for col in range(1, height-1):
+                if not(mask[col][row]):
+                    gauss_seidel[row][col] = 0.25*(input_matrix[row-1][col] + input_matrix[row+1][col] + input_matrix[row][col-1] + input_matrix[row][col+1])
+                    sor_adjustment = alpha * (gauss_seidel[row][col] - input_matrix[row][col])
+                    input_matrix[row][col] = sor_adjustment + input_matrix[row][col]
+                    error += np.abs(np.subtract(input_matrix[row][col], gauss_seidel[row][col]))
+        if error<error_threshold:
+            break
+        elif it>max_iter:
+            break
+        else:
+            error = 0
+        it = it + 1
+    return input_matrix, error, it
+
+def create_circle(r, cx, cy, xMESH, yMESH, value):
+    #return an array with zeroes everywhere except in a circulart pattern
+    #around cx cy
+    return np.select([((xMESH-cx)**2+(yMESH-cy)**2<r**2), ((xMESH-cx)**2+(yMESH-cy)**2>=r**2)],[value, 0])
+#unfortunately me and Nakanishi on his book Comp.Physics will differ on what is the better way to define boundaries as
+#i will use the Adobe photoshop method, which can be used for objects whose
+#geometry is non mathematically describable. Circular electrodes are easy, but a custom shape is impossible
+#this involves making a Bool array out of a picture, importing it, and iterating only the FALSE values
+def mask(array):
+    mask = array!=0
+    return mask
+
+#initialize the 0 potential, at 64x64 subdivisions
+
+subdivisions = 64
+edge = np.linspace(0, 1, subdivisions)
+xv, yv = np.meshgrid(edge, edge)
+V0 = np.zeros((subdivisions, subdivisions))
+fixed = create_circle(0.1, 0.38, 0.38, xv, yv, 3) + create_circle(0.1, 0.68, 0.68, xv, yv, -3)
+#3 volts and -3 volts potentials
+fixed_bool = mask(fixed)
+#the values of the boolean mask = mask.fx( on create_circle.fx) (mask of fixed)
+V0[0,:] = 0 #y lower
+V0[-1,:] = 0 #y upper
+V0[:,0] = 0 #x lower
+V0[:,-1] = 0 #x upper
+V0[fixed_bool] = fixed[fixed_bool] #potential value at the bool locations = fixed values at same locations (electrodes)
+conv_criterion = 1e-4 #cummulative allowed error throughout the whole field
+
+result = GS_potential(V0, fixed_bool, 2000, conv_criterion)
+
+"""
+plt.figure(figsize = (25, 20))
+plt.contourf(xv, yv, result[0], 70, cmap=plt.colormaps['magma'])
+plt.title("Gauss-Seidel potential")
+plt.colorbar()
+print(result[2], 'number of iterations needed for', subdivisions, 'x', subdivisions, 'mesh. Cummulative error is', result[1],'volt')
+"""
+
+"""
+#field lines
+dy, dx = np.gradient(result[0].T)
+
+plt.figure(figsize = (10, 10))
+plt.streamplot(xv, yv, -dx, -dy, color='yellow')
+plt.title("Electric field of the GS potential")
+#field lines flow from the positive potential to negative
+"""
+
+"""
+#as for the SOR, let us first calculate the ideal alpha
+
+alpha_ideal = 2/(1+(np.pi/subdivisions))
+result2 = SOR_potential(V0, fixed_bool, 2000, conv_criterion, alpha_ideal)
+plt.figure(figsize = (25, 20))
+plt.contourf(xv, yv, result2[0], 70, cmap=plt.colormaps['magma'])
+plt.title("SOR potential")
+plt.colorbar()
+print(result2[2], 'number of iterations needed for', subdivisions, 'x', subdivisions, 'mesh. Cummulative error is', result2[1],'volt and alpha=',alpha_ideal)
+#let us pick 4 alphas from the range 1, 2 and check how many iterations are needed to reach conv_criterium
+#64x64 is decently small for the task
+subdivisions = 80
+edge = np.linspace(0, 1, subdivisions)
+xv, yv = np.meshgrid(edge, edge)
+V0 = np.zeros((subdivisions, subdivisions))
+fixed = create_circle(0.1, 0.38, 0.38, xv, yv, 3) + create_circle(0.1, 0.68, 0.68, xv, yv, -3)
+#3 volts and -3 volts potentials
+fixed_bool = mask(fixed)
+#the values of the boolean mask = mask.fx( on create_circle.fx) (mask of fixed)
+V0[0,:] = 0 #y lower
+V0[-1,:] = 0 #y upper
+V0[:,0] = 0 #x lower
+V0[:,-1] = 0 #x upper
+V0[fixed_bool] = fixed[fixed_bool] #potential value at the bool locations = fixed values at same locations (electrodes)
+conv_criterion = 1e-4 #cummulative allowed error throughout the whole field
+
+
+nr_iter = []
+a = [1.2, 1.4, 1.6, 1.8]
+for alpha in (a):
+    field = SOR_potential(V0, fixed_bool, 2000, conv_criterion, alpha)
+    nr_iter.append(field[2])
+plt.style.use('dark_background')
+plt.figure(figsize = (15, 15))
+plt.plot(a, nr_iter, 'o-', linewidth=2.0,)
+plt.xlabel("alpha")
+plt.ylabel("iterations needed")
+plt.title("SOR on 64x64 mesh convergence")
+plt.grid()
+#for custum image potentials
+# image is 64x64 pixels
+
+from skimage import color
+from skimage import io
+img = color.rgb2gray(io.imread('../../Users/Enea/Desktop/test.png')) #edit directory where image is
+test = img<1
+subdivisions = 64
+edge = np.linspace(0, 1, subdivisions)
+xv, yv = np.meshgrid(edge, edge)
+V0 = np.zeros((subdivisions, subdivisions))
+fixed = img
+#3 volts and -3 volts potentials
+fixed_bool = test
+#the values of the boolean mask = mask.fx( on create_circle.fx) (mask of fixed)
+V0[0,:] = 0 #y lower
+V0[-1,:] = 0 #y upper
+V0[:,0] = 0 #x lower
+V0[:,-1] = 0 #x upper
+V0[fixed_bool] = fixed[fixed_bool] #potential value at the bool locations = fixed values at same locations (electrodes)
+conv_criterion = 1e-4 #cummulative allowed error throughout the whole field
+result3 = SOR_potential(V0, fixed_bool, 2000, conv_criterion, alpha_ideal)
+plt.figure(figsize = (25, 20))
+plt.contourf(xv, yv, result3[0], 70, cmap=plt.colormaps['magma'])
+plt.title("SOR potential for custom shape")
+plt.colorbar()
+print(result3[2], 'number of iterations needed for', subdivisions, 'x', subdivisions, 'mesh. Cummulative error is', result3[1],'volt and alpha=',alpha_ideal)
+"""
